@@ -1,0 +1,59 @@
+ ### PHẦN 1: GIẢI MÃ NHẬN XÉT – SỰ KHÁC NHAU GIỮA "TỐI ƯU SỐ" VÀ "CẢI TIẾN PHƯƠNG PHÁP"                                                                                 
+                                                                                                                                                                         
+  Người phản biện đang phân định ranh giới giữa 2 cấp độ:                                                                                                                
+                                                                                                                                                                         
+   Cấp độ                                  │ Hành động bạn làm                       │ Bản chất                                │ Giá trị học thuật
+  ─────────────────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────
+   Cấp độ 1: Tinh chỉnh thực nghiệm (Tối   │ Bạn lấy thuật toán LoRA có sẵn, đổi r=8 │ Đơn thuần là "thử và sai" (trial-and-   │ Thấp. Người khác sẽ hỏi: "Nếu đổi sang
+   ưu siêu tham số)                        │ lên r=16, đổi lr=1e-4 thành 2e-4, đổi   │ error) để tìm cấu hình chạy tốt trên    │ dataset khác thì r=16 có còn tốt không?
+                                           │ epochs rồi thấy accuracy tăng từ 52%    │ một tập dữ liệu cụ thể.                 │ Thuật toán mới ở đâu? Đóng góp khoa học
+                                           │ lên 61%.                                │                                         │ của bạn là gì ngoài việc bấm lệnh
+                                           │                                         │                                         │ train?"
+   Cấp độ 2: Cải tiến phương pháp          │ Bạn quan sát thấy SLM (1.5B) hay bị sai │ Đóng góp tri thức mới, có giả thuyết    │ Cao. Đây là tiêu chuẩn để viết khóa
+   (Methodological Innovation)             │ một lỗi cố hữu (vd: hay bịa tên cột,    │ khoa học (hypothesis) và có lý giải kỹ  │ luận tốt nghiệp loại xuất sắc hoặc công
+                                           │ hay nhầm JOIN). Bạn đề xuất một kỹ      │ thuật (technical motivation).           │ bố bài báo khoa học.
+                                           │ thuật/thuật toán mới để giải quyết lỗi  │                                         │
+                                           │ đó, sau đó chứng minh nó vượt trội hơn  │                                         │
+                                           │ LoRA chuẩn.                             │                                         │
+  ──────                                                                                                                                                                 
+  ### PHẦN 2: 3 ĐỀ XUẤT CẢI TIẾN PHƯƠNG PHÁP CÓ THỂ TRIỂN KHAI NGAY                                                                                                      
+                                                                                                                                                                         
+  Thay vì chỉ chạy LoRA thông thường ("Vanilla LoRA"), bạn có thể chọn 1 trong 3 hướng cải tiến dưới đây. Cả 3 hướng đều đánh trúng vào điểm yếu cố hữu của mô hình nhỏ  
+  (SLM) khi sinh SQL:                                                                                                                                                    
+  ──────                                                                                                                                                                 
+  #### Đề xuất 1: Huấn luyện theo lộ trình độ khó AST của SQL (Curriculum SFT)                                                                                           
+                                                                                                                                                                         
+  • Vấn đề của SLM: Mô hình nhỏ (0.5B – 1.5B) có dung lượng bộ nhớ tham số hạn chế. Khi bạn ném ngẫu nhiên cả câu SQL đơn giản (1 bảng) lẫn câu SQL cực khó (JOIN 4 bảng,
+  subquery lồng nhau, hàm ngày tháng) vào cùng một lượt train, mô hình dễ bị phân tán biểu diễn (gradient conflict), dẫn đến học nông cạn.                               
+  • Ý tưởng cải tiến: Áp dụng Curriculum Learning (Học từ dễ đến khó) dựa trên phân tích cây cú pháp Abstract Syntax Tree (AST) của SQL bằng sqlglot:                    
+      • Pha 1 (Warm-up / Cơ bản): 30% epochs đầu chỉ train các câu SQL 1 bảng (SELECT, WHERE, ORDER BY, LIMIT).                                                          
+      • Pha 2 (Trung bình): 40% epochs tiếp theo mở rộng sang câu có JOIN 2 bảng, GROUP BY, HAVING.                                                                      
+      • Pha 3 (Nâng cao): 30% epochs cuối train các câu có Subquery, CTE, Window Functions và Date/Time.                                                                 
+  • Luận điểm khoa học để viết báo cáo: "Chứng minh rằng việc sắp xếp dữ liệu theo độ phức tạp AST giúp mạng nơ-ron nhỏ ổn định không gian vector đặc trưng trước khi    
+  tiếp nhận các logic cú pháp đa tầng, giúp tăng khả năng tổng quát hóa trên các câu truy vấn phức tạp."                                                                 
+  ──────                                                                                                                                                                 
+  #### Đề xuất 2: Hàm mất mát có trọng số nhận biết Schema (Schema-Aware Weighted Loss)                                                                                  
+                                                                                                                                                                         
+  • Vấn đề của LoRA chuẩn: Hàm mất mát Cross-Entropy tiêu chuẩn coi mọi token như nhau: chữ SELECT, dấu phẩy ,, chữ WHERE hay tên cột student_id đều bị phạt điểm như    
+  nhau nếu dự đoán sai. Nhưng trong cơ sở dữ liệu:
+      • Sai một từ khóa phụ hoặc cách thụt dòng thì SQL vẫn chạy được.
+      • Chỉ cần hallucinate (bịa đặt) sai một tên bảng hoặc tên cột trong Schema là toàn bộ câu lệnh báo lỗi Runtime Error (Crash)!
+  • Ý tưởng cải tiến: Tùy biến hàm Loss khi train. Viết một Custom Data Collator nhận diện các token thuộc Schema (tên bảng, tên cột có trong prompt):
+  
+    ℒ      = ℒ        + λ · ℒ                (với λ = 2.0 hoặc 3.0)
+     total    grammar        schema\_tokens
+  
+  Ép mô hình phải chịu phạt nặng gấp 2–3 lần nếu dự đoán sai các token liên quan trực tiếp đến tên bảng và tên cột của database.
+  
+  • Luận điểm khoa học: "Giảm thiểu tỷ lệ ảo giác schema (Schema Hallucination) ở mô hình nhỏ thông qua cơ chế phạt gradient có chọn lọc."
+  ──────
+  #### Đề xuất 3: Mô hình LoRA hợp nhất Đa nhiệm: Tự sinh + Tự sửa lỗi (Dual-Task Unified LoRA)
+  
+  • Vấn đề của bài báo SLM-SQL gốc: Tác giả gốc phải duy trì 2 mô hình riêng biệt: 1 mô hình chuyên sinh SQL (SLM-SQL-Think) và 1 mô hình chuyên sửa SQL (SLM-SQL-Merge- 
+  Think). Điều này tốn gấp đôi VRAM và không thực tế khi triển khai local.
+  • Ý tưởng cải tiến: Tích hợp cả 2 năng lực vào DUY NHẤT 1 LoRA Adapter thông qua cơ chế Task-Prefix Prompting:
+      • Task 1: [TASK: GENERATE] → Sinh SQL có reasoning <think> từ câu hỏi và schema.
+      • Task 2: [TASK: REPAIR] → Nhận câu SQL bị lỗi cú pháp + thông báo lỗi do SQLite compiler trả về → Phân tích nguyên nhân trong <think> và sửa lại SQL đúng trong   
+      <answer>.
+  • Luận điểm khoa học: "Giải quyết bài toán giới hạn phần cứng ở môi trường biên: Đạt được năng lực tự sửa lỗi (Self-Correction) tương đương hệ thống đa tác tử (multi- 
+  agent) nhưng chỉ tiêu tốn tài nguyên của một mô hình đơn lẻ."

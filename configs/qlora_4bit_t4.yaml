@@ -1,0 +1,11 @@
+model_name_or_path: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+precision: bf16
+quantization: nf4
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+training:
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 2.0e-4
